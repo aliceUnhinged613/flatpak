@@ -425,6 +425,8 @@ ${FLATPAK} ${U} uninstall -y org.test.NewHello org.test.Platform
 ok "eol-rebase"
 
 ${FLATPAK} ${U} install -y test-repo org.test.Platform
+# Explicitly installing a runtime pins it; undo that
+${FLATPAK} ${U} pin --remove runtime/org.test.Platform/$ARCH/master
 
 port=$(cat httpd-port)
 UPDATE_REPO_ARGS="--redirect-url=http://127.0.0.1:${port}/test-gpg3 --gpg-import=${FL_GPG_HOMEDIR2}/pubring.gpg" update_repo
@@ -593,9 +595,13 @@ ${FLATPAK} ${U} list -a --columns=application > list-log
 assert_file_has_content list-log "org\.test\.Platform"
 
 # Check that the runtime won't be removed if it's pinned
-${FLATPAK} ${U} pin org.test.Platform
+# (which happens during the install above)
 ${FLATPAK} ${U} pin > pins
-assert_file_has_content pins "org\.test\.Platform"
+assert_file_has_content pins "runtime/org\.test\.Platform/$ARCH/master"
+NUM_PINS=$(cat pins | wc -l)
+if [ $NUM_PINS -ne 1 ]; then
+    assert_not_reached "There should only be one pinned runtime"
+fi
 rm pins
 
 ${FLATPAK} ${U} uninstall -y --unused
@@ -604,7 +610,7 @@ ${FLATPAK} ${U} list -a --columns=application > list-log
 assert_file_has_content list-log "org\.test\.Platform"
 
 # Remove the pin and try again
-${FLATPAK} ${U} pin --remove "org.test.Platform"
+${FLATPAK} ${U} pin --remove "runtime/org.test.Platform/$ARCH/master"
 ${FLATPAK} ${U} uninstall -y --unused
 ${FLATPAK} ${U} list -a --columns=application > list-log
 assert_not_file_has_content list-log "org\.test\.Platform"
