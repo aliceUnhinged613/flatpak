@@ -528,8 +528,7 @@ flatpak_transaction_add_default_dependency_sources (FlatpakTransaction *self)
  */
 static gboolean
 ref_is_installed (FlatpakTransaction *self,
-                  const char         *ref,
-                  GError            **error)
+                  const char         *ref)
 {
   FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
   g_autoptr(GFile) deploy_dir = NULL;
@@ -2030,16 +2029,8 @@ add_deps (FlatpakTransaction          *self,
 
   if (runtime_op == NULL)
     {
-      g_autoptr(GError) local_error = NULL;
-
-      if (!ref_is_installed (self, full_runtime_ref, &local_error))
+      if (!ref_is_installed (self, full_runtime_ref))
         {
-          if (local_error != NULL)
-            {
-              g_propagate_error (error, g_steal_pointer (&local_error));
-              return FALSE;
-            }
-
           runtime_remote = find_runtime_remote (self, op->ref, full_runtime_ref, op->kind, error);
           if (runtime_remote == NULL)
             return FALSE;
