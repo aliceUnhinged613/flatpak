@@ -379,6 +379,20 @@ make_updated_app () {
     update_repo $REPONAME "${COLLECTION_ID}"
 }
 
+make_updated_runtime () {
+    REPONAME=${1:-test}
+    if [ x${USE_COLLECTIONS_IN_SERVER-} == xyes ] ; then
+        COLLECTION_ID=${2:-org.test.Collection.${REPONAME}}
+    else
+        COLLECTION_ID=""
+    fi
+    BRANCH=${3:-master}
+    TEXT=${4:-UPDATED}
+
+    GPGARGS="${GPGARGS:-${FL_GPGARGS}}" $(dirname $0)/make-test-runtime.sh repos/${REPONAME} org.test.Platform "${BRANCH}" "${COLLECTION_ID}" "${TEXT}" > /dev/null
+    update_repo $REPONAME "${COLLECTION_ID}"
+}
+
 setup_sdk_repo () {
     REPONAME=${1:-test}
     if [ x${USE_COLLECTIONS_IN_SERVER-} == xyes ] ; then

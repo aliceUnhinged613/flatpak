@@ -24,7 +24,7 @@ set -euo pipefail
 skip_without_bwrap
 skip_revokefs_without_fuse
 
-echo "1..38"
+echo "1..39"
 
 #Regular repo
 setup_repo
@@ -423,6 +423,24 @@ assert_has_file $HOME/.var/app/org.test.Hello/data/another-file
 ${FLATPAK} ${U} uninstall -y org.test.NewHello org.test.Platform
 
 ok "eol-rebase"
+
+EXPORT_ARGS="--end-of-life=Reason3" make_updated_runtime
+
+${FLATPAK} ${U} install -y test-repo org.test.Hello
+${FLATPAK} ${U} list -d > list-log
+assert_file_has_content list-log "org\.test\.Hello"
+assert_file_has_content list-log "org\.test\.Platform"
+
+${FLATPAK} ${U} uninstall -y org.test.Hello
+
+${FLATPAK} ${U} list -d > list-log
+assert_not_file_has_content list-log "org\.test\.Hello"
+assert_not_file_has_content list-log "org\.test\.Platform"
+
+# Remove eol for future tests
+EXPORT_ARGS="" make_updated_runtime
+
+ok "eol runtime uninstalled with app"
 
 ${FLATPAK} ${U} install -y test-repo org.test.Platform
 # Explicitly installing a runtime pins it; undo that

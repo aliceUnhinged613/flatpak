@@ -1983,6 +1983,48 @@ find_runtime_remote (FlatpakTransaction             *self,
   return NULL;
 }
 
+static gboolean
+runtime_will_be_unused (FlatpakInstallation *installation,
+                        const char          *full_runtime_ref,
+                        const char          *to_be_uninstalled_ref,
+                        gboolean            *out_runtime_unused,
+                        GError             **error)
+{
+  GVariantBuilder builder;
+  g_autoptr(GVariant) options = NULL;
+  g_auto(GStrv) parts = NULL;
+  g_autoptr(GPtrArray) unused_refs = NULL;
+  const char *exclude_refs[2] = { to_be_uninstalled_ref, NULL };
+  gboolean runtime_unused = FALSE;
+
+  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a{sv}"));
+  g_variant_builder_add (&builder, "{s@v}", "exclude-refs",
+                         g_variant_new_variant (g_variant_new_strv ((const char * const *) exclude_refs, -1)));
+  options = g_variant_ref_sink (g_variant_builder_end (&builder));
+
+  parts = g_strsplit (full_runtime_ref, "/", 0);
+  unused_refs = flatpak_installation_list_unused_refs_with_options (installation, parts[2], options, NULL, error);
+  if (unused_refs == NULL)
+    return FALSE;
+
+  for (guint i = 0; i < unused_refs->len; i++)
+    {
+      FlatpakInstalledRef *iref = g_ptr_array_index (unused_refs, i);
+      if (flatpak_ref_get_kind (FLATPAK_REF (iref)) == FLATPAK_REF_KIND_RUNTIME &&
+          g_strcmp0 (flatpak_ref_get_name (FLATPAK_REF (iref)), parts[1]) == 0 &&
+          g_strcmp0 (flatpak_ref_get_arch (FLATPAK_REF (iref)), parts[2]) == 0 &&
+          g_strcmp0 (flatpak_ref_get_branch (FLATPAK_REF (iref)), parts[3]) == 0)
+        {
+          runtime_unused = TRUE;
+          break;
+        }
+    }
+
+  if (out_runtime_unused)
+    *out_runtime_unused = runtime_unused;
+
+  return TRUE;
+}
 
 static gboolean
 add_deps (FlatpakTransaction          *self,
@@ -2016,10 +2058,32 @@ add_deps (FlatpakTransaction          *self,
 
   if (op->kind == FLATPAK_TRANSACTION_OPERATION_UNINSTALL)
     {
-      /* If the runtime this app uses is already to be uninstalled, then this uninstall must happen before
-         the runtime is uninstalled */
+      g_autoptr(GBytes) deploy_data = NULL;
+
+      /* If the runtime is EOL and unused and in the same dir, uninstall it too. */
+      if (runtime_op == NULL &&
+          !priv->disable_deps &&
+          dir_ref_is_installed (priv->dir, full_runtime_ref, &runtime_remote, &deploy_data))
+        {
+          gboolean runtime_unused;
+
+          if (flatpak_deploy_data_get_eol (deploy_data) == NULL &&
+              flatpak_deploy_data_get_eol_rebase (deploy_data) == NULL)
+            return TRUE;
+
+          if (!runtime_will_be_unused (priv->installation, full_runtime_ref, op->ref, &runtime_unused, error))
+            return FALSE;
+
+          if (runtime_unused)
+            runtime_op = flatpak_transaction_add_op (self, runtime_remote, full_runtime_ref, NULL, NULL, NULL, NULL,
+                                                     FLATPAK_TRANSACTION_OPERATION_UNINSTALL);
+        }
+
       if (runtime_op && runtime_op->kind == FLATPAK_TRANSACTION_OPERATION_UNINSTALL)
-        run_operation_before (op, runtime_op, 1);
+        {
+          flatpak_transaction_operation_add_related_to_op (runtime_op, op);
+          run_operation_before (op, runtime_op, 1);
+        }
 
       return TRUE;
     }

@@ -3075,6 +3075,55 @@ flatpak_installation_list_unused_refs (FlatpakInstallation *self,
                                        GCancellable        *cancellable,
                                        GError             **error)
 {
+  return flatpak_installation_list_unused_refs_with_options (self, arch, NULL, cancellable, error);
+}
+
+static void
+prune_excluded_refs (char **full_refs,
+                     char **refs_to_exclude)
+{
+  guint full_refs_len = g_strv_length (full_refs);
+  for (guint i = 0; i < full_refs_len; i++)
+    {
+      if (full_refs[i] == NULL)
+        break;
+      if (g_strv_contains ((const gchar * const*)refs_to_exclude, full_refs[i]))
+        {
+          guint len = g_strv_length (full_refs);
+          g_free (full_refs[i]);
+          full_refs[i] = full_refs[len - 1];
+          full_refs[len - 1] = NULL;
+        }
+    }
+}
+
+/**
+ * flatpak_installation_list_unused_refs_with_options:
+ * @self: a #FlatpakInstallation
+ * @arch: (nullable): if non-%NULL, the architecture of refs to collect
+ * @options: (nullable): if non-%NULL, a GVariant a{sv} with an extensible set
+ *                       of options
+ * @cancellable: (nullable): a #GCancellable
+ * @error: return location for a #GError
+ *
+ * Like flatpak_installation_list_unused_refs() but supports an extensible set
+ * of options. The following are currently defined:
+ *
+ *   * exclude-refs (as): Act as if these refs are not installed even if they
+ *       are when determining the set of unused refs
+ *
+ * Returns: (transfer container) (element-type FlatpakInstalledRef): a GPtrArray of
+ *   #FlatpakInstalledRef instances
+ *
+ * Since: 1.8.2
+ */
+GPtrArray *
+flatpak_installation_list_unused_refs_with_options (FlatpakInstallation *self,
+                                                    const char          *arch,
+                                                    GVariant            *options,
+                                                    GCancellable        *cancellable,
+                                                    GError             **error)
+{
   g_autoptr(FlatpakDir) dir = NULL;
   g_autoptr(GHashTable) refs_hash = NULL;
   g_autoptr(GPtrArray) refs =  NULL;
@@ -3082,7 +3131,11 @@ flatpak_installation_list_unused_refs (FlatpakInstallation *self,
   g_auto(GStrv) runtime_refs = NULL;
   g_autoptr(GHashTable) used_refs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
   g_autoptr(GHashTable) used_runtimes = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  g_autofree char **refs_to_exclude = NULL;
   int i;
+
+  if (options)
+    (void) g_variant_lookup (options, "exclude-refs", "^a&s", &refs_to_exclude);
 
   dir = flatpak_installation_get_dir (self, error);
   if (dir == NULL)
@@ -3093,6 +3146,12 @@ flatpak_installation_list_unused_refs (FlatpakInstallation *self,
 
   if (!flatpak_dir_list_refs (dir, "runtime", &runtime_refs, cancellable, error))
     return NULL;
+
+  if (refs_to_exclude != NULL)
+    {
+      prune_excluded_refs (app_refs, refs_to_exclude);
+      prune_excluded_refs (runtime_refs, refs_to_exclude);
+    }
 
   refs_hash = g_hash_table_new (g_str_hash, g_str_equal);
   refs = g_ptr_array_new_with_free_func (g_object_unref);
