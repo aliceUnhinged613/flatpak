@@ -2095,12 +2095,43 @@ add_deps (FlatpakTransaction          *self,
     {
       if (!ref_is_installed (self, full_runtime_ref))
         {
+          g_autoptr(GBytes) deploy_data = NULL;
+
           runtime_remote = find_runtime_remote (self, op->ref, full_runtime_ref, op->kind, error);
           if (runtime_remote == NULL)
             return FALSE;
 
           runtime_op = flatpak_transaction_add_op (self, runtime_remote, full_runtime_ref, NULL, NULL, NULL, NULL,
                                                    FLATPAK_TRANSACTION_OPERATION_INSTALL_OR_UPDATE);
+
+          /* If the main ref is changing to a different runtime, the previous might now be unused */
+          if (op->kind == FLATPAK_TRANSACTION_OPERATION_UPDATE &&
+              dir_ref_is_installed (priv->dir, op->ref, NULL, &deploy_data))
+            {
+              g_autoptr(GBytes) runtime_deploy_data = NULL;
+              g_autofree char *prev_runtime_remote = NULL;
+              const char *previous_runtime = flatpak_deploy_data_get_runtime (deploy_data);
+              g_autofree char *full_previous_runtime = g_strconcat ("runtime/", previous_runtime, NULL);
+
+              if (g_strcmp0 (previous_runtime, runtime_ref) != 0 &&
+                  dir_ref_is_installed (priv->dir, full_previous_runtime, &prev_runtime_remote, &runtime_deploy_data) &&
+                  (flatpak_deploy_data_get_eol (runtime_deploy_data) != NULL ||
+                   flatpak_deploy_data_get_eol_rebase (runtime_deploy_data) != NULL))
+                {
+                  FlatpakTransactionOperation *prev_runtime_op = NULL;
+                  gboolean runtime_unused;
+                  if (!runtime_will_be_unused (priv->installation, full_previous_runtime, op->ref, &runtime_unused, error))
+                    return FALSE;
+
+                  if (runtime_unused)
+                    {
+                      prev_runtime_op = flatpak_transaction_add_op (self, prev_runtime_remote, full_previous_runtime, NULL, NULL, NULL, NULL,
+                                                                    FLATPAK_TRANSACTION_OPERATION_UNINSTALL);
+                      flatpak_transaction_operation_add_related_to_op (prev_runtime_op, op);
+                      run_operation_before (op, prev_runtime_op, 1);
+                    }
+                }
+            }
         }
       else
         {
